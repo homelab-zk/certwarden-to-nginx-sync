@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Push Cert Warden certificates to Nginx Proxy Manager as custom certificates.
+
+For each target in the config file: download fullchain + key from Cert Warden,
+then create the NPM custom certificate on the first run, or upload over the same
+certificate id on later runs, so proxy hosts that use it keep working. Unchanged
+certificates are skipped. Proxy hosts are never touched.
+
+Non-secret settings live in a TOML config file (see examples/targets.example.toml).
+Secrets live in an env file, read as plain KEY=VALUE text and never executed by a
+shell (see examples/env.example). Nothing secret is printed.
+
+Usage: certwarden-to-npm-sync [--only NAME] [--force] [--dry-run]
+                           [--config FILE] [--env FILE] [--state-dir DIR]
+"""
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import tomllib
+import urllib.error
+import urllib.request
+import uuid
+
+DEFAULT_CONFIG = "/etc/certwarden-to-npm-sync/targets.toml"
+DEFAULT_ENV = "/etc/certwarden-to-npm-sync/env"
+DEFAULT_STATE_DIR = "/var/lib/certwarden-to-npm-sync"
+KEY_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def load_env(path):
+    env = {}
+    with open(path) as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+                v = v[1:-1]
+            env[k.strip()] = v
+    return env
+
+
+def http(method, url, headers=None, body=None, timeout=30):
+    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def http_json(method, url, token=None, payload=None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    body = json.dumps(payload).encode() if payload is not None else None
+    code, raw = http(method, url, headers, body)
+    try:
+        return code, json.loads(raw)
+    except ValueError:
+        return code, {}
+
+
+def multipart(fields):
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{name}.pem"\r\n'
+            f"Content-Type: application/x-pem-file\r\n\r\n{value}\r\n"
+        )
+    parts.append(f"--{boundary}--\r\n")
+    return "".join(parts).encode(), f"multipart/form-data; boundary={boundary}"
+
+
+def prefix_of(target):
+    """Env variable prefix for a target: its own env_prefix, else the upper-cased name."""
+    return target.get("env_prefix") or re.sub(r"[^A-Za-z0-9]", "_", target["name"]).upper()
+
+
+def fetch_cert_and_key(cw_url, cw_cert, cert_apikey, key_apikey):
+    base = cw_url.rstrip("/") + "/certwarden/api/v1/download"
+    code, raw = http("GET", f"{base}/certificates/{cw_cert}", {"X-API-Key": cert_apikey})
+    if code != 200:
+        raise RuntimeError(f"Cert Warden certificate download failed (HTTP {code})")
+    fullchain = raw.decode()
+    code, raw = http("GET", f"{base}/privatecerts/{cw_cert}", {"X-API-Key": f"{cert_apikey}.{key_apikey}"})
+    if code != 200:
+        raise RuntimeError(f"Cert Warden key download failed (HTTP {code})")
+    m = KEY_RE.search(raw.decode())
+    if not m:
+        raise RuntimeError("no private key found in Cert Warden response")
+    if "BEGIN CERTIFICATE" not in fullchain:
+        raise RuntimeError("certificate response is not PEM")
+    return fullchain, m.group(0) + "\n"
+
+
+def run_target(target, cfg, env, state_dir, force, dry_run):
+    name = target["name"]
+    p = prefix_of(target)
+    cw_url = cfg.get("cert_warden_url") or env["CW_URL"]
+    base = (target.get("npm_url") or env[f"NPM_{p}_URL"]).rstrip("/")
+    npm_name = target.get("npm_name") or f"cw-{target['cw_cert']}"
+
+    fullchain, key = fetch_cert_and_key(cw_url, target["cw_cert"], env[f"CW_{p}_CERT_APIKEY"], env[f"CW_{p}_KEY_APIKEY"])
+    digest = hashlib.sha256(fullchain.encode()).hexdigest()
+    state_file = os.path.join(state_dir, f"{name}.sha256")
+    old = open(state_file).read().strip() if os.path.exists(state_file) else ""
+
+    code, body = http_json("POST", base + "/api/tokens",
+                           payload={"identity": env[f"NPM_{p}_USER"], "secret": env[f"NPM_{p}_PASS"]})
+    token = body.get("token")
+    if not token:
+        raise RuntimeError(f"NPM login failed (HTTP {code})")
+    code, certs = http_json("GET", base + "/api/nginx/certificates", token)
+    if code != 200 or not isinstance(certs, list):
+        raise RuntimeError(f"NPM certificate list failed (HTTP {code})")
+    existing = next((c for c in certs if c.get("nice_name") == npm_name), None)
+
+    if existing and old == digest and not force:
+        log(f"[{name}] unchanged, NPM cert id {existing['id']} up to date, nothing to do")
+        return
+    if dry_run:
+        action = f"upload over NPM cert id {existing['id']}" if existing else "create NPM cert and upload"
+        log(f"[{name}] dry run: would {action} ({'changed' if old != digest else 'forced'})")
+        return
+
+    if existing:
+        cert_id = existing["id"]
+        log(f"[{name}] updating NPM cert id {cert_id} ({npm_name})")
+    else:
+        code, created = http_json("POST", base + "/api/nginx/certificates", token,
+                                  {"provider": "other", "nice_name": npm_name})
+        if code not in (200, 201) or "id" not in created:
+            raise RuntimeError(f"NPM certificate create failed (HTTP {code})")
+        cert_id = created["id"]
+        log(f"[{name}] created NPM cert id {cert_id} ({npm_name})")
+
+    body, ctype = multipart({"certificate": fullchain, "certificate_key": key})
+    code, raw = http("POST", f"{base}/api/nginx/certificates/{cert_id}/upload",
+                     {"Authorization": "Bearer " + token, "Content-Type": ctype}, body)
+    if code not in (200, 201):
+        try:
+            msg = json.loads(raw).get("error", {}).get("message", "")
+        except ValueError:
+            msg = ""
+        raise RuntimeError(f"NPM upload failed (HTTP {code}) {msg}")
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    with open(state_file, "w") as fh:
+        fh.write(digest + "\n")
+    log(f"[{name}] uploaded OK")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", help="only this target name")
+    ap.add_argument("--force", action="store_true", help="upload even if the certificate is unchanged")
+    ap.add_argument("--dry-run", action="store_true", help="show what would happen, change nothing")
+    ap.add_argument("--config", default=DEFAULT_CONFIG)
+    ap.add_argument("--env", default=DEFAULT_ENV)
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    args = ap.parse_args()
+
+    with open(args.config, "rb") as fh:
+        cfg = tomllib.load(fh)
+    env = load_env(args.env)
+    targets = cfg.get("target", [])
+    if args.only:
+        targets = [t for t in targets if t["name"] == args.only]
+        if not targets:
+            sys.exit(f"no target named {args.only!r} in {args.config}")
+    failed = 0
+    for t in targets:
+        try:
+            run_target(t, cfg, env, args.state_dir, args.force, args.dry_run)
+        except Exception as exc:  # keep going so one failure does not block the other targets
+            failed += 1
+            log(f"[{t['name']}] ERROR: {exc}")
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()

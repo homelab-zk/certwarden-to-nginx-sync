@@ -1,0 +1,19 @@
+# /etc/certwarden-to-npm-sync/targets.toml
+# Non-secret settings for certwarden-to-npm-sync. One [[target]] per certificate.
+
+# Cert Warden base URL as seen from the machine that runs the script.
+# (If left out, CW_URL from the env file is used.)
+cert_warden_url = "http://127.0.0.1:4050"
+
+[[target]]
+name     = "main"                       # label for logs and the state file; also selects the env variables (MAIN)
+cw_cert  = "example-wildcard"           # certificate name in Cert Warden
+npm_url  = "http://npm.example.lan:81"  # NPM admin/API URL (or set NPM_MAIN_URL in the env file)
+npm_name = "cw-example-wildcard"        # nice name of the custom certificate created in NPM
+
+[[target]]
+name     = "lab"
+cw_cert  = "example-lab-wildcard"
+npm_url  = "http://npm-lab.example.lan:81"
+npm_name = "cw-example-lab-wildcard"
+# env_prefix = "LAB2"                   # optional: use LAB2 instead of the upper-cased name
