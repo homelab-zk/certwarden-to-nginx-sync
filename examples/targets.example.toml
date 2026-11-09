@@ -17,3 +17,22 @@ cw_cert  = "example-lab-wildcard"
 npm_url  = "http://npm-lab.example.lan:81"
 npm_name = "cw-example-lab-wildcard"
 # env_prefix = "LAB2"                   # optional: use LAB2 instead of the upper-cased name
+
+# --- Plain nginx hosts (no NPM): pushed over SSH ---------------------------------------
+# Writes the files, runs test_cmd, then reload_cmd; restores the old files if either
+# fails. Settings on the target are the defaults for every host; a host can be a plain
+# string or a table that overrides them. Secrets still come from the env file.
+[[target]]
+name       = "web"                      # selects env variables CW_WEB_CERT_APIKEY / CW_WEB_KEY_APIKEY
+type       = "nginx-ssh"
+cw_cert    = "example-wildcard"
+ssh_user   = "certpush"
+ssh_key    = "/etc/certwarden-to-npm-sync/id_ed25519"
+cert_path  = "/etc/ssl/wildcard/fullchain.pem"    # receives the full chain
+key_path   = "/etc/ssl/wildcard/privkey.pem"
+test_cmd   = "sudo -n nginx -t"                   # default: nginx -t
+reload_cmd = "sudo -n systemctl reload nginx"     # default: nginx -s reload
+hosts = [
+  "proxy1.example.lan",
+  { host = "proxy2.example.lan", ssh_port = 2222, cert_path = "/etc/nginx/ssl/fullchain.pem", key_path = "/etc/nginx/ssl/privkey.pem" },
+]
