@@ -14,7 +14,7 @@ Non-secret settings live in a TOML config file (see examples/targets.example.tom
 Secrets live in an env file, read as plain KEY=VALUE text and never executed by a
 shell (see examples/env.example). Nothing secret is printed.
 
-Usage: certwarden-to-npm-sync [--only NAME] [--force] [--dry-run]
+Usage: certwarden-to-nginx-sync [--only NAME] [--force] [--dry-run]
                            [--config FILE] [--env FILE] [--state-dir DIR]
 """
 import argparse
@@ -30,9 +30,9 @@ import urllib.error
 import urllib.request
 import uuid
 
-DEFAULT_CONFIG = "/etc/certwarden-to-npm-sync/targets.toml"
-DEFAULT_ENV = "/etc/certwarden-to-npm-sync/env"
-DEFAULT_STATE_DIR = "/var/lib/certwarden-to-npm-sync"
+DEFAULT_CONFIG = "/etc/certwarden-to-nginx-sync/targets.toml"
+DEFAULT_ENV = "/etc/certwarden-to-nginx-sync/env"
+DEFAULT_STATE_DIR = "/var/lib/certwarden-to-nginx-sync"
 KEY_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
 
 

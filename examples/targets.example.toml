@@ -1,5 +1,5 @@
-# /etc/certwarden-to-npm-sync/targets.toml
-# Non-secret settings for certwarden-to-npm-sync. One [[target]] per certificate.
+# /etc/certwarden-to-nginx-sync/targets.toml
+# Non-secret settings for certwarden-to-nginx-sync. One [[target]] per certificate.
 
 # Cert Warden base URL as seen from the machine that runs the script.
 # (If left out, CW_URL from the env file is used.)
@@ -27,7 +27,7 @@ name       = "web"                      # selects env variables CW_WEB_CERT_APIK
 type       = "nginx-ssh"
 cw_cert    = "example-wildcard"
 ssh_user   = "certpush"
-ssh_key    = "/etc/certwarden-to-npm-sync/id_ed25519"
+ssh_key    = "/etc/certwarden-to-nginx-sync/id_ed25519"
 cert_path  = "/etc/ssl/wildcard/fullchain.pem"    # receives the full chain
 key_path   = "/etc/ssl/wildcard/privkey.pem"
 test_cmd   = "sudo -n nginx -t"                   # default: nginx -t

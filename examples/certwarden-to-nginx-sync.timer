@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily push of Cert Warden certificates to NPM
+Description=Daily push of Cert Warden certificates to nginx
 
 [Timer]
 OnCalendar=*-*-* 03:15:00

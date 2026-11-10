@@ -1,4 +1,4 @@
-# certwarden-to-npm-sync
+# certwarden-to-nginx-sync
 
 A small Python tool (standard library only) that pushes certificates from
 [Cert Warden](https://www.certwarden.com/) to your nginx servers and keeps them updated when Cert Warden renews
@@ -79,28 +79,28 @@ To move many **existing** hosts onto the pushed certificate in one go, see
 
 1. Install the script and create the directories:
    ```bash
-   sudo install -m 750 certwarden-to-npm-sync /usr/local/bin/certwarden-to-npm-sync
-   sudo mkdir -p /etc/certwarden-to-npm-sync /var/lib/certwarden-to-npm-sync
-   sudo chmod 700 /var/lib/certwarden-to-npm-sync
+   sudo install -m 750 certwarden-to-nginx-sync /usr/local/bin/certwarden-to-nginx-sync
+   sudo mkdir -p /etc/certwarden-to-nginx-sync /var/lib/certwarden-to-nginx-sync
+   sudo chmod 700 /var/lib/certwarden-to-nginx-sync
    ```
-2. Create `/etc/certwarden-to-npm-sync/targets.toml` from
+2. Create `/etc/certwarden-to-nginx-sync/targets.toml` from
    [`examples/targets.example.toml`](examples/targets.example.toml): one `[[target]]` per certificate.
-3. Create `/etc/certwarden-to-npm-sync/env` from [`examples/env.example`](examples/env.example), fill in the
-   Cert Warden API keys for each target (and the NPM login for `npm` targets), then `sudo chmod 600 /etc/certwarden-to-npm-sync/env`.
+3. Create `/etc/certwarden-to-nginx-sync/env` from [`examples/env.example`](examples/env.example), fill in the
+   Cert Warden API keys for each target (and the NPM login for `npm` targets), then `sudo chmod 600 /etc/certwarden-to-nginx-sync/env`.
    For a plain nginx target use `type = "nginx-ssh"` (see below). Both kinds can be mixed in one file.
 4. Test without changing anything, then run it for real:
    ```bash
-   sudo certwarden-to-npm-sync --dry-run
-   sudo certwarden-to-npm-sync
+   sudo certwarden-to-nginx-sync --dry-run
+   sudo certwarden-to-nginx-sync
    ```
    The first real run creates a custom certificate in NPM per target. Assign it to your proxy hosts once (SSL
    tab in NPM, or in bulk with `npm-swap-cert`). Later runs print `unchanged` until Cert Warden has renewed
    the certificate.
 5. Install the timer:
    ```bash
-   sudo cp examples/certwarden-to-npm-sync.service examples/certwarden-to-npm-sync.timer /etc/systemd/system/
-   sudo systemctl daemon-reload && sudo systemctl enable --now certwarden-to-npm-sync.timer
-   journalctl -u certwarden-to-npm-sync.service      # logs of each run
+   sudo cp examples/certwarden-to-nginx-sync.service examples/certwarden-to-nginx-sync.timer /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now certwarden-to-nginx-sync.timer
+   journalctl -u certwarden-to-nginx-sync.service      # logs of each run
    ```
 
 ## Plain nginx hosts (`nginx-ssh`)
@@ -113,7 +113,7 @@ name       = "web"
 type       = "nginx-ssh"
 cw_cert    = "example-wildcard"
 ssh_user   = "certpush"
-ssh_key    = "/etc/certwarden-to-npm-sync/id_ed25519"
+ssh_key    = "/etc/certwarden-to-nginx-sync/id_ed25519"
 cert_path  = "/etc/ssl/wildcard/fullchain.pem"
 key_path   = "/etc/ssl/wildcard/privkey.pem"
 test_cmd   = "sudo -n nginx -t"
@@ -158,7 +158,7 @@ do that yet. Nginx in a container works when the certificate directory is a volu
 | `--only NAME` | Only this target. |
 | `--force` | Push even if the certificate has not changed. |
 | `--dry-run` | Show what would happen, change nothing. |
-| `--config FILE`, `--env FILE`, `--state-dir DIR` | Override the default paths under `/etc/certwarden-to-npm-sync` and `/var/lib/certwarden-to-npm-sync`. |
+| `--config FILE`, `--env FILE`, `--state-dir DIR` | Override the default paths under `/etc/certwarden-to-nginx-sync` and `/var/lib/certwarden-to-nginx-sync`. |
 
 ## Monitoring
 
